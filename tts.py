@@ -55,9 +55,7 @@ class PathSpeaker(Speaker):
               type=click.Choice(LANGUAGES, case_sensitive=False))
 @click.option("-s",
               "--speaker",
-              default="xenia",
-              help="Speaker name",
-              show_default=True)
+              help="Speaker name (default 'xenia' or 'en_5')")
 @click.option("-r",
               "--sample-rate",
               default="48000",
@@ -77,6 +75,7 @@ def start(input, output, language, speaker, sample_rate, cache_dir):
             source = f.read()
 
     model = LANGUAGES[language].model
+    speaker = speaker or LANGUAGES[language].speaker
     speaker = PathSpeaker(model_id=model,
                           language=language,
                           speaker=speaker,
