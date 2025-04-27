@@ -37,6 +37,9 @@ male and female voices. Generates MP3 output from text input via file or STDIN.
    # or
    # For AMD GPUs
    uv pip install torch --index-url https://download.pytorch.org/whl/rocm6.3
+   # or
+   # For CPU only
+   uv pip install torch --index-url https://download.pytorch.org/whl/cpu
    ```
 
 3. **Download Silero Models**:
@@ -61,7 +64,7 @@ python tts.py --input input.txt --output speech.mp3
 
 | Option            | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
-| `-i, --input`     | Input text file (optional - uses stdin if not specified)                    |
+| `-i, --input`     | Input text file (optional - uses STDIN if not specified)                    |
 | `-o, --output`    | Output MP3 file path (required)                                             |
 | `-c, --cache-dir` | Temporary directory for processing (default: system temp)                   |
 | `-l, --language`  | Language: `ru` (Russian) or `en` (English) [default: ru]                    |
@@ -75,7 +78,7 @@ python tts.py --input input.txt --output speech.mp3
    python tts.py -i novel.txt -o audiobook.mp3 -l en -s male
    ```
 
-2. **Pipe text from stdin**:
+2. **Pipe text from STDIN**:
    ```bash
    echo "Привет мир! 12345" | python tts.py -o greeting.mp3 -l ru
    ```
@@ -89,7 +92,7 @@ python tts.py --input input.txt --output speech.mp3
 
 - First run may take longer due to model initialization
 - Temporary files are automatically cleaned up after processing
-- For Russian text, numbers are converted to words using Russian grammatical rules
+- Numbers are converted to words
 - Input text is automatically transliterated to appropriate script (Cyrillic/Latin)
 - Requires FFmpeg in system PATH for MP3 support
 
@@ -106,3 +109,7 @@ python tts.py --input input.txt --output speech.mp3
 **Model Loading Errors**:
 - Verify model files are in `models/` directory
 - Check file permissions for model files
+
+## License
+
+Source code is primarily distributed under the terms of the MIT license. See LICENSE for details.
