@@ -2,4 +2,4 @@
 
 set -e -x
 
-yapf -i *.py utilities/*.py
+yapf -i *.py

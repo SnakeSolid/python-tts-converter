@@ -1,76 +1,108 @@
-# Text-to-Speech (TTS) Converter
+# Text-to-Speech Converter
 
-This program is a command-line tool for converting text into speech and saving the output as an MP3 file. It supports
-English and Russian languages and allows customization of voice and sample rate. The program is built using Python and
-leverages the `speakerpy` library for speech synthesis.
+A Python script for converting text to speech using Silero TTS models. Supports English (`en`) and Russian (`ru`) with
+male and female voices. Generates MP3 output from text input via file or STDIN.
 
-## How It Works
+## Features
 
-The program reads text from a file or standard input (STDIN), synthesizes speech using a pre-configured model and
-voice, and saves the result as an MP3 file. It supports the following features:
+- Multi-language support (English, Russian)
+- GPU acceleration (CUDA/ROCm) with fallback to CPU
+- Text preprocessing (number conversion, transliteration)
+- Chunked processing for long texts
+- Temporary file cleanup
 
-* *Language Support*: Currently supports Russian (ru) and English (en).
+## Prerequisites
 
-* *Voice Selection*: Allows choosing a specific voice for synthesis (e.g., xenia for Russian, en_5 for English).
-
-* *Sample Rate Customization*: Supports multiple sample rates (8000, 16000, 24000, 48000 Hz) for the output audio.
-
-* *Caching*: Uses a cache directory to store intermediate files, improving performance for repeated runs.
+- Python 3.12+
+- `uv` package manager (`pip install uv`)
+- FFmpeg (for audio processing)
+- NVIDIA or AMD GPU drivers (optional, for GPU acceleration)
 
 ## Installation
 
-To use this program, follow these steps:
+1. **Install dependencies**:
+   ```bash
+   # Clone repository
+   git clone https://github.com/your-repository/text-to-speech-converter.git
+   cd python-tts-converter
+   # Sync base dependencies
+   uv sync
+   ```
 
-```sh
-# clone repository
-git clone https://github.com/your-repository/text-to-speech-converter.git
-cd python-tts-converter
+2. **Install PyTorch** (choose appropriate command for your hardware):
 
-# set up virtual environment
-python -m venv venv
-source venv/bin/activate # On Windows, use `venv\Scripts\activate`
+   ```bash
+   # For NVIDIA GPUs
+   uv pip install torch
+   # or
+   # For AMD GPUs
+   uv pip install torch --index-url https://download.pytorch.org/whl/rocm6.3
+   ```
 
-# install dependencies
-pip install -r requirements.txt
-```
+3. **Download Silero Models**:
+   ```bash
+   mkdir -p models
+   # Russian model
+   wget https://models.silero.ai/models/tts/ru/ru_v3.pt -O models/ru_v3.pt
+   # English model
+   wget https://models.silero.ai/models/tts/en/v3_en.pt -O models/v3_en.pt
+   ```
 
 ## Usage
 
-To run the program, use the following command:
+### Basic Command
 
-```sh
-python tts.py --input source-text.txt --output output.mp3
+```bash
+source .venv/bin/activate
+python tts.py --input input.txt --output speech.mp3
 ```
 
-The program accepts the following options:
+### Options
 
-* `-i`, `--input`: Path to the input text file. If not provided, text is read from STDIN.
-* `-o`, `--output`: Path to the output MP3 file.
-* `-l`, `--language`: Language for speech synthesis (ru for Russian, en for English).
-* `-s`, `--speaker`: Voice for speech synthesis (e.g., xenia for Russian, en_5 for English).
-* `-r`, `--sample-rate`: Sample rate for the output audio (8000, 16000, 24000, 48000 Hz).
-* `-c`, `--cache-dir`: Directory for caching intermediate files.
+| Option            | Description                                                                 |
+|-------------------|-----------------------------------------------------------------------------|
+| `-i, --input`     | Input text file (optional - uses stdin if not specified)                    |
+| `-o, --output`    | Output MP3 file path (required)                                             |
+| `-c, --cache-dir` | Temporary directory for processing (default: system temp)                   |
+| `-l, --language`  | Language: `ru` (Russian) or `en` (English) [default: ru]                    |
+| `-s, --speaker`   | Speaker gender: `male` or `female` [default: female]                        |
+| `-d, --device`    | PyTorch device: `cuda`, `cpu`, or specific device [default: cuda]           |
 
-## Examples
+### Examples
 
-Convert Text from a File:
+1. **Text file to speech**:
+   ```bash
+   python tts.py -i novel.txt -o audiobook.mp3 -l en -s male
+   ```
 
-```sh
-python tts.py -i input.txt -o output.mp3 -l ru -s xenia -r 24000
-```
+2. **Pipe text from stdin**:
+   ```bash
+   echo "Привет мир! 12345" | python tts.py -o greeting.mp3 -l ru
+   ```
 
-Convert Text from STDIN:
-
-```sh
-echo "Привет, мир!" | python tts.py -o output.mp3
-```
+3. **CPU processing**:
+   ```bash
+   python tts.py -i input.txt -o output.mp3 --device cpu
+   ```
 
 ## Notes
 
-* Ensure the speakerpy library is properly configured and the required models are available.
-* The program uses the system's temporary directory for caching by default. You can specify a custom cache directory using the -c option.
-* Supported sample rates are 8000, 16000, 24000, and 48000 Hz. Higher sample rates result in better audio quality but larger file sizes.
+- First run may take longer due to model initialization
+- Temporary files are automatically cleaned up after processing
+- For Russian text, numbers are converted to words using Russian grammatical rules
+- Input text is automatically transliterated to appropriate script (Cyrillic/Latin)
+- Requires FFmpeg in system PATH for MP3 support
 
-## License
+## Troubleshooting
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+**No GPU Acceleration**:
+- Use `--device cpu` for CPU-only processing
+- Verify PyTorch installation with `python -c "import torch; print(torch.cuda.is_available())"`
+
+**Audio Quality Issues**:
+- Ensure text contains only supported characters: letters, numbers, and basic punctuation
+- Check for proper text encoding in input files (UTF-8 recommended)
+
+**Model Loading Errors**:
+- Verify model files are in `models/` directory
+- Check file permissions for model files

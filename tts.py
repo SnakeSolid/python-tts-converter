@@ -1,90 +1,174 @@
-import click
+import collections
+import re
+import sys
 import tempfile
+import click
+import torch
+import os
 
-from collections import namedtuple
-from pathlib import Path
-from speakerpy.lib_sl_text import SeleroText
-from speakerpy.lib_speak import Speaker
-from sys import stdin
+from num2words import num2words
+from pydub import AudioSegment
+from transliterate import translit
+from functools import reduce
 
-# Russian: speaker = xenia, model = ru_v3, language = "ru"
-# English: speaker = en_0, model = v3_en, language = "en"
+Speaker = collections.namedtuple("Speaker", ["language", "voice"])
+TtsModel = collections.namedtuple("TtsModel",
+                                  ["path", "speaker", "sample_rate"])
 
-LanguageSettings = namedtuple("LanguageSettings", ["model", "speaker"])
+PATTERN_NUMBER = re.compile("\\d+")
 
-LANGUAGES = {
-    "en": LanguageSettings("v3_en", "en_5"),
-    "ru": LanguageSettings("ru_v3", "xenia"),
+# wget https://models.silero.ai/models/tts/en/v3_en.pt
+# wget https://models.silero.ai/models/tts/ru/ru_v3.pt
+
+LANGUAGE_MODELS = {
+    Speaker("ru", "male"): TtsModel("models/ru_v3.pt", "aidar", 48000),
+    Speaker("ru", "female"): TtsModel("models/ru_v3.pt", "xenia", 48000),
+    Speaker("en", "male"): TtsModel("models/v3_en.pt", "en_2", 48000),
+    Speaker("en", "female"): TtsModel("models/v3_en.pt", "en_5", 48000),
 }
 
-SAMPLE_RATES = {
-    "8000": int(8000),
-    "16000": int(16000),
-    "24000": int(24000),
-    "48000": int(48000),
-}
+DELIMITER_GROUPS = [["\n"], [".", "!", "?"], [",", ":", ";"], [" "]]
 
 
-class PathSpeaker(Speaker):
+def chunk_generator(text, chunk_length, delimiter_groups=DELIMITER_GROUPS):
+    offset = 0
+    text_length = len(text)
 
-    def save_mp3(
-        self,
-        text: str,
-        sample_rate: int,
-        output_file: str,
-        cache_dir: str,
-    ) -> Path:
-        sl_text = SeleroText(text, to_language=self.language)
-        filenames = list(
-            self._chunks_synthes(sl_text, cache_dir, sample_rate, sample_rate))
-        output_file = Path(output_file)
+    def find_bound(left, right):
+        for group in delimiter_groups:
+            result = -1
 
-        self._join_mp3(filenames, output_file)
+            for delimiter in group:
+                delimiter_len = len(delimiter)
 
-        return filenames
+                if left + delimiter_len > right:
+                    continue
+
+                position = text.rfind(delimiter, left, right)
+
+                if position != -1:
+                    result = max(result, position + delimiter_len)
+
+            if result != -1:
+                return result
+
+        return -1
+
+    while offset < text_length:
+        remaining = text_length - offset
+
+        if remaining <= chunk_length:
+            chunk = text[offset:].strip()
+
+            if chunk != "":
+                yield chunk
+
+            offset = text_length
+
+            break
+
+        right_bound = offset + chunk_length
+        current_bound = find_bound(offset, right_bound)
+
+        if current_bound != -1:
+            chunk = text[offset:current_bound].strip()
+
+            if chunk != "":
+                yield chunk
+
+            offset = current_bound
+        else:
+            chunk = text[offset:right_bound].strip()
+
+            if chunk != "":
+                yield chunk
+
+            offset = right_bound
+
+
+def text_to_speech(text, output, cache_dir, speaker, tts_model, device_name):
+    device = torch.device(device_name)
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              tts_model.path)
+    model = torch.package.PackageImporter(model_path).load_pickle(
+        "tts_models", "model")
+    model.to(device)
+
+    text = "".join((c for c in text
+                    if c.isspace() or c.isdigit() or c.isalpha()
+                    or c in {".", "!", "?", ",", ":", ";", "-", "'", "\""}))
+    text = PATTERN_NUMBER.sub(
+        lambda match: num2words(int(match.group(0)), lang=speaker.language),
+        text)
+    text = translit(text, speaker.language)
+    output_files = []
+
+    for index, chunk in enumerate(chunk_generator(text, 500)):
+        print(">>> ", chunk)
+
+        audio_path = os.path.join(cache_dir, "{:04d}.wav".format(index))
+        model.save_wav(text=chunk,
+                       audio_path=audio_path,
+                       speaker=tts_model.speaker,
+                       sample_rate=tts_model.sample_rate)
+        output_files.append(audio_path)
+
+    speech = reduce(lambda acc, val: acc + AudioSegment.from_file(val),
+                    output_files, AudioSegment.empty())
+    speech.export(output, format="mp3")
+
+    for audio_path in output_files:
+        os.remove(audio_path)
 
 
 @click.command()
-@click.option("-i", "--input", help="Input file (default STDIN)")
-@click.option("-o", "--output", help="Output file")
-@click.option("-l",
-              "--language",
-              default="ru",
-              help="Speaker language",
-              show_default=True,
-              type=click.Choice(LANGUAGES, case_sensitive=False))
-@click.option("-s",
-              "--speaker",
-              help="Speaker name (default 'xenia' or 'en_5')")
-@click.option("-r",
-              "--sample-rate",
-              default="48000",
-              help="Sample rate",
-              show_default=True,
-              type=click.Choice(SAMPLE_RATES, case_sensitive=False))
-@click.option("-c",
-              "--cache-dir",
+@click.option("--input",
+              "-i",
+              "input_file",
+              type=click.Path(exists=True, dir_okay=False),
+              help="Input file path")
+@click.option("--output",
+              "-o",
+              required=True,
+              type=click.Path(dir_okay=False),
+              help="Output file path")
+@click.option("--cache-dir",
+              "-c",
               default=tempfile.gettempdir(),
-              help="Cache directory",
-              show_default=True)
-def start(input, output, language, speaker, sample_rate, cache_dir):
-    if input is None or input == "-":
-        source = stdin.read()
+              show_default=True,
+              type=click.Path(file_okay=False),
+              help="Temporary files directory")
+@click.option("--language",
+              "-l",
+              default="ru",
+              show_default=True,
+              type=click.Choice(["ru", "en"], case_sensitive=False),
+              help="Language (ru or en)")
+@click.option("--speaker",
+              "-s",
+              default="female",
+              show_default=True,
+              type=click.Choice(["male", "female"], case_sensitive=False),
+              help="Speaker (male or female)")
+@click.option("--device",
+              "-d",
+              default="cuda",
+              show_default=True,
+              help="PyTorch device name")
+def tts(input_file, output, cache_dir, language, speaker, device):
+    if input_file:
+        with open(input_file, "r") as f:
+            input_text = f.read()
     else:
-        with open(input, "r") as f:
-            source = f.read()
+        input_text = sys.stdin.read()
 
-    model = LANGUAGES[language].model
-    speaker = speaker or LANGUAGES[language].speaker
-    speaker = PathSpeaker(model_id=model,
-                          language=language,
-                          speaker=speaker,
-                          device="cpu")
-    speaker.save_mp3(source,
-                     output_file=output,
-                     cache_dir=cache_dir,
-                     sample_rate=SAMPLE_RATES[sample_rate])
+    cache_dir = os.path.abspath(cache_dir)
+    os.makedirs(cache_dir, exist_ok=True)
+    speaker = Speaker(language, speaker)
+    model = LANGUAGE_MODELS[speaker]
+
+    text_to_speech(input_text, output, cache_dir, speaker, model, device)
 
 
-if __name__ == '__main__':
-    start()
+if __name__ == "__main__":
+    tts()

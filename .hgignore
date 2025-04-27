@@ -1,6 +1,5 @@
 syntax: glob
-*.yml
-__pycache__
-data
-tmp
-venv
+.project
+.pydevproject
+.venv
+models
