@@ -1,24 +1,21 @@
+import click
 import collections
+import os
 import re
 import sys
 import tempfile
-import click
 import torch
-import os
 
 from num2words import num2words
 from pydub import AudioSegment
+from torch.package.package_importer import PackageImporter
 from transliterate import translit
-from functools import reduce
 
 Speaker = collections.namedtuple("Speaker", ["language", "voice"])
 TtsModel = collections.namedtuple("TtsModel",
                                   ["path", "speaker", "sample_rate"])
 
 PATTERN_NUMBER = re.compile("\\d+")
-
-# wget https://models.silero.ai/models/tts/en/v3_en.pt
-# wget https://models.silero.ai/models/tts/ru/ru_v3.pt
 
 LANGUAGE_MODELS = {
     Speaker("ru", "male"): TtsModel("models/ru_v3.pt", "aidar", 48000),
@@ -28,6 +25,8 @@ LANGUAGE_MODELS = {
 }
 
 DELIMITER_GROUPS = [["\n"], [".", "!", "?"], [",", ":", ";"], [" "]]
+CHUNK_PREFIX = "chunk-"
+CHUNK_POSTFIX = ".wav"
 
 
 def chunk_generator(text, chunk_length, delimiter_groups=DELIMITER_GROUPS):
@@ -90,8 +89,7 @@ def text_to_speech(text, output, cache_dir, speaker, tts_model, device_name):
     device = torch.device(device_name)
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               tts_model.path)
-    model = torch.package.PackageImporter(model_path).load_pickle(
-        "tts_models", "model")
+    model = PackageImporter(model_path).load_pickle("tts_models", "model")
     model.to(device)
 
     text = "".join((c for c in text
@@ -101,24 +99,34 @@ def text_to_speech(text, output, cache_dir, speaker, tts_model, device_name):
         lambda match: num2words(int(match.group(0)), lang=speaker.language),
         text)
     text = translit(text, speaker.language)
-    output_files = []
+    speech = AudioSegment.empty()
 
     for index, chunk in enumerate(chunk_generator(text, 500)):
-        print(">>> ", chunk)
-
-        audio_path = os.path.join(cache_dir, "{:04d}.wav".format(index))
+        audio_path = os.path.join(
+            cache_dir, "{}{:04d}{}".format(CHUNK_PREFIX, index, CHUNK_POSTFIX))
         model.save_wav(text=chunk,
                        audio_path=audio_path,
                        speaker=tts_model.speaker,
                        sample_rate=tts_model.sample_rate)
-        output_files.append(audio_path)
+        speech += AudioSegment.from_file(audio_path)
 
-    speech = reduce(lambda acc, val: acc + AudioSegment.from_file(val),
-                    output_files, AudioSegment.empty())
     speech.export(output, format="mp3")
 
-    for audio_path in output_files:
-        os.remove(audio_path)
+
+def clear_cache(cache_dir):
+    """
+    Clears the specified cache directory by removing all files that match the chunk pattern.
+
+    Args:
+        cache_dir (str): The path to the directory to be cleared.
+    """
+    if not os.path.exists(cache_dir):
+        return
+
+    for item in os.listdir(cache_dir):
+        if item.startswith(CHUNK_PREFIX) and item.endswith(CHUNK_POSTFIX):
+            item_path = os.path.join(cache_dir, item)
+            os.unlink(item_path)
 
 
 @click.command()
@@ -167,7 +175,12 @@ def tts(input_file, output, cache_dir, language, speaker, device):
     speaker = Speaker(language, speaker)
     model = LANGUAGE_MODELS[speaker]
 
-    text_to_speech(input_text, output, cache_dir, speaker, model, device)
+    try:
+        text_to_speech(input_text, output, cache_dir, speaker, model, device)
+    except Exception as e:
+        print(e)
+    finally:
+        clear_cache(cache_dir)
 
 
 if __name__ == "__main__":
