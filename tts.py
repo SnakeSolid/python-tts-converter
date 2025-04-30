@@ -85,6 +85,37 @@ def chunk_generator(text, chunk_length, delimiter_groups=DELIMITER_GROUPS):
             offset = right_bound
 
 
+def remove_unicode(text):
+    """
+    Removes all characters from the input text that are not spaces, digits, alphabetic characters,
+    or specific punctuation marks (., !, ?, ,, :, ;, -, ', \").
+
+    Args:
+        text (str): The input text from which to remove unwanted characters.
+
+    Returns:
+        str: The cleaned text with only allowed characters.
+    """
+    return "".join((c for c in text
+                    if c.isspace() or c.isdigit() or c.isalpha()
+                    or c in {".", "!", "?", ",", ":", ";", "-", "'", "\""}))
+
+
+def convert_numbers(text, language):
+    """
+    Converts all numbers in the input text to their word representation in the specified language.
+
+    Args:
+        text (str): The input text containing numbers to be converted.
+        language (str): The language code for the word representation of numbers (e.g., 'en' for English, 'ru' for Russian).
+
+    Returns:
+        str: The text with numbers replaced by their word representation.
+    """
+    return PATTERN_NUMBER.sub(
+        lambda match: num2words(int(match.group(0)), lang=language), text)
+
+
 def text_to_speech(text, output, cache_dir, speaker, tts_model, device_name):
     device = torch.device(device_name)
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -92,13 +123,9 @@ def text_to_speech(text, output, cache_dir, speaker, tts_model, device_name):
     model = PackageImporter(model_path).load_pickle("tts_models", "model")
     model.to(device)
 
-    text = "".join((c for c in text
-                    if c.isspace() or c.isdigit() or c.isalpha()
-                    or c in {".", "!", "?", ",", ":", ";", "-", "'", "\""}))
-    text = PATTERN_NUMBER.sub(
-        lambda match: num2words(int(match.group(0)), lang=speaker.language),
-        text)
+    text = convert_numbers(text, speaker.language)
     text = translit(text, speaker.language)
+    text = remove_unicode(text)
     speech = AudioSegment.empty()
 
     for index, chunk in enumerate(chunk_generator(text, 500)):
